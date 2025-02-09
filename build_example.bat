@@ -1,1 +1,0 @@
-gcc -Wall -Wextra -o example example.c -lgdi32 -lopengl32

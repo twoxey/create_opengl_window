@@ -2,31 +2,38 @@
 
 #include "stdbool.h"
 
-typedef enum Event_Type {
+typedef enum {
     Event_close,
     Event_key_up,
     Event_key_down,
     Event_mouse_button_up,
     Event_mouse_button_down,
 } Event_Type;
-typedef enum Mouse_Button {
+
+typedef enum {
     Button_left,
 } Mouse_Button;
-typedef struct Event {
+
+typedef struct {
     Event_Type type;
     union {
-        char key; // Event_key_{up/down},
-                  // see: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+        char key; // Event_key_{up/down}, vk code: https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
         Mouse_Button button; // Event_mouse_button_{up/down}
     };
 } Event;
 
 typedef struct Window Window;
+
 Window* create_window();
 void destroy_window(const Window* win);
 bool window_check_event(Window* win, Event* event);
-void begin_drawing(const Window* win);
-void end_drawing(const Window* win);
+bool window_should_close(Window* win);
+void window_make_current(const Window* win);
+void window_swap_buffers(const Window* win);
+// Load OpenGL functions into the address space of the current process,
+// a gl context should have been bound to the current thread with wglMakeCurrent()
+// before using this function.
+void load_gl_procs();
 
 //
 // Implementation
@@ -77,19 +84,28 @@ XXX(PFNGLDRAWARRAYSINSTANCEDPROC,       glDrawArraysInstanced) \
 GL_PROCS
 #undef XXX
 
+void load_gl_procs() {
+#define XXX(type, name) assert(name = (type)(void*)wglGetProcAddress(#name));
+GL_PROCS
+#undef XXX
+}
+
 static DWORD create_window_thread_id = 0;
 
 struct Window {
+    unsigned int width, height;
+    int mouse_x, mouse_y;
+
+    // internal
     HWND hwnd;
     HDC hdc;
     HGLRC hglrc;
 
-    unsigned int width, height;
-    int mouse_x, mouse_y;
-
     int event_read_index;
     int event_write_index;
     Event events[100];
+
+    bool should_close;
 };
 
 Window* thread_create_window(const WNDCLASSA* opengl_window_class) {
@@ -101,7 +117,7 @@ Window* thread_create_window(const WNDCLASSA* opengl_window_class) {
     // window handle when it's first created. This is to make sure the pointer
     // is valid when the window proc is called.
     HWND hwnd = CreateWindowA(opengl_window_class->lpszClassName, "OpenGL",
-                              WS_OVERLAPPEDWINDOW|WS_VISIBLE,
+                              WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
                               0, 0, 0, win);
     assert(hwnd);
@@ -109,7 +125,7 @@ Window* thread_create_window(const WNDCLASSA* opengl_window_class) {
     PIXELFORMATDESCRIPTOR pfd = {};
     pfd.nSize = sizeof(pfd);
     pfd.nVersion = 1;
-    pfd.dwFlags = PFD_DRAW_TO_WINDOW|PFD_DRAW_TO_WINDOW|PFD_DOUBLEBUFFER;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
     pfd.iPixelType = PFD_TYPE_RGBA;
     pfd.cColorBits = 32;
     pfd.cDepthBits = 24;
@@ -138,36 +154,45 @@ void window_push_event(Window* win, Event event) {
 }
 
 bool window_check_event(Window* win, Event* event) {
-    if (win->event_read_index == win->event_write_index) return false; // no events
+    if (win->event_read_index == win->event_write_index) return false; // no event
     *event = win->events[win->event_read_index];
     Barrier();
     win->event_read_index = (win->event_read_index + 1) % ARRAY_LEN(win->events);
+    if (event->type == Event_close) win->should_close = true;
     return true;
 }
 
+bool window_should_close(Window* win) {
+    if (win->should_close) {
+        win->should_close = false;
+        return true;
+    }
+    return false;
+}
+
 LRESULT window_proc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    // Get the pointer to the Window struct from hWnd
     Window* win = (Window*)GetWindowLongPtrA(hWnd, GWLP_USERDATA);
     switch (Msg) {
-    case WM_CREATE: {
-        // Store a back pointer to the Window structure to access the data
-        // inside the window procedure. This is passed in via CreateWindow().
-        CREATESTRUCTA* create_struct = (CREATESTRUCTA*)lParam;
-        SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)create_struct->lpCreateParams);
-    } break;
+        case WM_CREATE: {
+            // Store a pointer back to the Window structure to access the data
+            // inside the window procedure. This is passed in via CreateWindow().
+            CREATESTRUCTA* create_struct = (CREATESTRUCTA*)lParam;
+            SetWindowLongPtrA(hWnd, GWLP_USERDATA, (LONG_PTR)create_struct->lpCreateParams);
+        } break;
 
-    case WM_CLOSE: {
-        Event ev;
-        ev.type = Event_close;
-        window_push_event(win, ev);
-    } break;
+        case WM_CLOSE: {
+            Event ev;
+            ev.type = Event_close;
+            window_push_event(win, ev);
+        } break;
 
-    case WM_SIZE: {
-        win->width = LOWORD(lParam);
-        win->height = HIWORD(lParam);
-    } break;
+        case WM_SIZE: {
+            win->width = LOWORD(lParam);
+            win->height = HIWORD(lParam);
+        } break;
 
-    default:
-        return DefWindowProc(hWnd, Msg, wParam, lParam);
+        default: return DefWindowProc(hWnd, Msg, wParam, lParam);
     }
     return 0;
 }
@@ -177,7 +202,7 @@ struct Thread_Create_Window_Params {
 };
 #define THREAD_CREATE_WINDOW (WM_USER+100)
 #define THREAD_DESTROY_WINDOW (WM_USER+101)
-#define THREAD_WINDOW_CREATED (WM_USER+103)
+#define THREAD_WINDOW_CREATED (WM_USER+102)
 
 DWORD create_window_thread_proc(LPVOID lpParameter) {
     WNDCLASSA wc = {};
@@ -194,18 +219,14 @@ DWORD create_window_thread_proc(LPVOID lpParameter) {
     // initilized an OpenGL context, so we can load GL functions afterwards.
     Window* win = thread_create_window(&wc);
     assert(win);
-
-#define XXX(type, name) assert(name = (type)(void*)wglGetProcAddress(#name));
-GL_PROCS
-#undef XXX
-
+    load_gl_procs();
     wglMakeCurrent(win->hdc, 0);
     // Signal the other thread that the window has been created.
     PostThreadMessageA(p->thread_id, THREAD_WINDOW_CREATED, (WPARAM)win, 0);
 
-    for (MSG msg; GetMessageA(&msg, 0, 0, 0) >= 0;) {
-        switch (msg.message) {
-        case THREAD_CREATE_WINDOW: {
+    MSG msg;
+    while (GetMessageA(&msg, 0, 0, 0) >= 0) {
+        if (msg.message ==THREAD_CREATE_WINDOW) {
             // New call of create_window()
             // wParam stores the paramerters for the call
             struct Thread_Create_Window_Params* p = (struct Thread_Create_Window_Params*)msg.wParam;
@@ -213,58 +234,53 @@ GL_PROCS
             assert(win);
             wglMakeCurrent(win->hdc, 0);
             PostThreadMessageA(p->thread_id, THREAD_WINDOW_CREATED, (WPARAM)win, 0);
-        } break;
-
-        case THREAD_DESTROY_WINDOW: {
+        } else if (msg.message == THREAD_DESTROY_WINDOW) {
             Window* win = (Window*)msg.wParam;
             DestroyWindow(win->hwnd);
             free(win);
-        } break;
-
-        default: {
+        } else {
             if (msg.hwnd) {
+                // handle window messages
                 Window* win = (Window*)GetWindowLongPtrA(msg.hwnd, GWLP_USERDATA);
                 switch (msg.message) {
-                case WM_KEYUP: {
-                    Event ev;
-                    ev.type = Event_key_up;
-                    ev.key = msg.wParam; // wParam is the virtual key code
-                    window_push_event(win, ev);
-                } break;
+                    case WM_KEYUP: {
+                        Event ev;
+                        ev.type = Event_key_up;
+                        ev.key = msg.wParam;
+                        window_push_event(win, ev);
+                    } break;
 
-                case WM_KEYDOWN: {
-                    Event ev;
-                    ev.type = Event_key_down;
-                    ev.key = msg.wParam; // wParam is the virtual key code
-                    window_push_event(win, ev);
-                } break;
+                    case WM_KEYDOWN: {
+                        Event ev;
+                        ev.type = Event_key_down;
+                        ev.key = msg.wParam;
+                        window_push_event(win, ev);
+                    } break;
 
-                case WM_MOUSEMOVE: {
-                    POINTS p = MAKEPOINTS(msg.lParam);
-                    win->mouse_x = p.x;
-                    win->mouse_y = p.y;
-                } break;
+                    case WM_MOUSEMOVE: {
+                        POINTS p = MAKEPOINTS(msg.lParam);
+                        win->mouse_x = p.x;
+                        win->mouse_y = p.y;
+                    } break;
 
-                case WM_LBUTTONUP: {
-                    Event ev;
-                    ev.type = Event_mouse_button_up;
-                    ev.button = Button_left;
-                    window_push_event(win, ev);
-                } break;
+                    case WM_LBUTTONUP: {
+                        Event ev;
+                        ev.type = Event_mouse_button_up;
+                        ev.button = Button_left;
+                        window_push_event(win, ev);
+                    } break;
 
-                case WM_LBUTTONDOWN: {
-                    Event ev;
-                    ev.type = Event_mouse_button_down;
-                    ev.button = Button_left;
-                    window_push_event(win, ev);
-                } break;
-
+                    case WM_LBUTTONDOWN: {
+                        Event ev;
+                        ev.type = Event_mouse_button_down;
+                        ev.button = Button_left;
+                        window_push_event(win, ev);
+                    } break;
                 }
             }
 
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
-        } break;
         }
     }
     assert(false); // GetMessage() Errored
@@ -296,11 +312,10 @@ void destroy_window(const Window* win) {
     PostThreadMessageA(create_window_thread_id, THREAD_DESTROY_WINDOW, (WPARAM)win, 0);
 }
 
-void begin_drawing(const Window* win) {
+void window_make_current(const Window* win) {
     wglMakeCurrent(win->hdc, win->hglrc);
 }
 
-void end_drawing(const Window* win) {
+void window_swap_buffers(const Window* win) {
     SwapBuffers(win->hdc);
-    wglMakeCurrent(win->hdc, 0);
 }

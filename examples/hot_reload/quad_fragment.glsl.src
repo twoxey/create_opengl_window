@@ -1,0 +1,15 @@
+#include "quad_shader_def.h"
+
+in vec2 frag_uv;
+out vec4 out_color;
+
+void main() {
+    out_color = color;
+    switch (type) {
+        case QUAD_ellipse:
+        if (length(frag_uv - vec2(.5)) > .5) {
+            out_color.a = 0;
+        }
+        break;
+    }
+}
