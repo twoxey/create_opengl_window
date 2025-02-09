@@ -170,6 +170,7 @@ char* format_build_command(Arena* a, const char* cmd, const char* target, int nu
                 --a->used; // remove the null terminator
                 p += sizeof(fmt_deps) - 1;
             } else {
+                fprintf(stderr, "[ERROR]: Invalid format argument in command: '%s'\n", cmd);
                 assert(!"Invalid format argument");
             }
         } else {
@@ -189,7 +190,6 @@ bool target_needs_rebuild_(const char* target_file_path, int deps_count, char* c
 
     for (int i = 0; i < deps_count; ++i) {
         FILETIME* src_write_time = get_file_last_write_time(deps[i]);
-        printf("time: %d, f: %s\n", src_write_time, deps[i]);
         assert(src_write_time); // source file should exist
         if (!need_rebuild && CompareFileTime(src_write_time, target_write_time) > 0) {
             need_rebuild = true;
@@ -219,7 +219,6 @@ bool target_needs_rebuild_v_(const char* target_file_path, ...) {
 #define run_build_command(cmd, target, ...) do {char* deps[] = {__VA_ARGS__}; run_build_command_(cmd, target, sizeof(deps)/sizeof(deps[0]), deps);} while(0)
 void run_build_command_(const char* cmd, const char* target, int num_deps, char* const deps[]) {
     char* build_command = format_build_command(&arena_on_stack(1024), cmd, target, num_deps, deps);
-    printf("cmd --> %s\n", build_command);
     if (target_needs_rebuild_(target, num_deps, deps)) {
         run_command(build_command);
     }
@@ -266,16 +265,15 @@ int main(int argc, char* argv[]) {
 #define out_path "out"
     assert(create_directory(out_path));
 
-    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/multi-window", "examples/multiple_windows.c");
-    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/simple", "examples/simple.c");
+    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/multi-window.exe", "examples/multiple_windows.c");
+    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/simple.exe", "examples/simple.c");
 
     // hot reload example
 #define src_dir "examples/hot_reload"
-    //run_build_command("cpp -P -o %target %deps", out_path"/quad_vertex.glsl", src_dir"/quad_vertex.glsl.src");
-    //run_build_command("cpp -P -o %target %deps", out_path"/quad_fragment.glsl", src_dir"/quad_fragment.glsl.src");
-    run_build_command("cpp -P %deps", out_path"/quad_shader_processed.c", src_dir"/quad_shader.c");
-    //run_build_command("gcc -shared -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/hot_reload.dll", src_dir"/hot_reload.c");
-    //run_build_command("gcc -Wall -Wextra -o %target %deps", out_path"/hot_reload.exe", src_dir"/main.c");
+    run_build_command("cpp -P -CC -o %target %deps", out_path"/quad_shader_processed.c", src_dir"/quad_shader.c");
+    run_build_command("gcc -shared -I. -Wall -Wextra -o %target " src_dir"/hot_reload.c" " -lgdi32 -lopengl32", out_path"/hot_reload.dll",
+                            src_dir"/hot_reload.c", src_dir"/quad_shader.c");
+    run_build_command("gcc -Wall -Wextra -o %target %deps", out_path"/hot_reload.exe", src_dir"/main.c");
 
     return 0;
 }

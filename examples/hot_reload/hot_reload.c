@@ -116,7 +116,7 @@ bool draw_frame(Window* win) {
 
     if (quad_shader_program) {
         glUseProgram(quad_shader_program);
-        glUniform2f(u_vec2_screen_size, win->width, win->height);
+        glUniform2f(u_screen_size, win->width, win->height);
         draw_ellipse(-100, 0, 200, 120, Color_v4(.8, .1, .7, 1));
     }
 
