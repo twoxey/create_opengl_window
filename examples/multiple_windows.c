@@ -16,6 +16,8 @@ int main() {
     Window* main_window = create_window();
     Window* sub_windows[5] = {};
 
+    gl_swap_interval(1); // enable vsync;
+
     uint8_t r = 0;
     uint8_t b = 0;
     uint64_t perf_freq = query_performance_frequency();

@@ -65,17 +65,17 @@ DWORD rename_file(const char* existing_file_name, const char* new_file_name) {
 }
 
 bool create_directory(const char* path_name) {
-  BOOL success = CreateDirectoryA(path_name, 0);
-  if (success) {
-    fprintf(stderr, "[INFO] Created directory: %s\n", path_name);
-  } else {
-    DWORD error = GetLastError();
-    if (error != ERROR_ALREADY_EXISTS) {
-      fprintf(stderr, "[ERROR] Failed to created directory, error: %lu\n", error);
-      return false;
+    BOOL success = CreateDirectoryA(path_name, 0);
+    if (success) {
+        fprintf(stderr, "[INFO] Created directory: %s\n", path_name);
+    } else {
+        DWORD error = GetLastError();
+        if (error != ERROR_ALREADY_EXISTS) {
+            fprintf(stderr, "[ERROR] Failed to created directory, error: %lu\n", error);
+            return false;
+        }
     }
-  }
-  return true;
+    return true;
 }
 
 FILETIME* get_file_last_write_time(const char* file_path);
@@ -190,7 +190,7 @@ bool target_needs_rebuild_(const char* target_file_path, int deps_count, char* c
 
     for (int i = 0; i < deps_count; ++i) {
         FILETIME* src_write_time = get_file_last_write_time(deps[i]);
-        assert(src_write_time); // source file should exist
+        assert(src_write_time && "Source file should exist");
         if (!need_rebuild && CompareFileTime(src_write_time, target_write_time) > 0) {
             need_rebuild = true;
         }
@@ -216,7 +216,7 @@ bool target_needs_rebuild_v_(const char* target_file_path, ...) {
     return target_needs_rebuild_(target_file_path, deps_count, deps);
 }
 
-#define run_build_command(cmd, target, ...) do {char* deps[] = {__VA_ARGS__}; run_build_command_(cmd, target, sizeof(deps)/sizeof(deps[0]), deps);} while(0)
+#define run_build_command(cmd, target, ...) do {char* deps[] = {__VA_ARGS__}; run_build_command_(cmd, target, sizeof(deps)/sizeof(deps[0]), sizeof(deps)?deps:0);} while(0)
 void run_build_command_(const char* cmd, const char* target, int num_deps, char* const deps[]) {
     char* build_command = format_build_command(&arena_on_stack(1024), cmd, target, num_deps, deps);
     if (target_needs_rebuild_(target, num_deps, deps)) {

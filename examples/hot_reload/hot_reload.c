@@ -89,6 +89,7 @@ color_v4 Color_v4(float r, float g, float b, float a) {
 Window* on_load(Window* win) {
     if (!win) {
         win = create_window();
+        gl_swap_interval(1); // enable vsync
     } else {
         // we already have a window, just load the gl procs to call them in the dll
         load_gl_procs();
@@ -117,7 +118,8 @@ bool draw_frame(Window* win) {
     if (quad_shader_program) {
         glUseProgram(quad_shader_program);
         glUniform2f(u_screen_size, win->width, win->height);
-        draw_ellipse(-100, 0, 200, 120, Color_v4(.8, .1, .7, 1));
+        draw_ellipse(-300, 0, 200, 120, Color_v4(0, .1, 0, 1));
+        draw_ellipse(0, 0, 50, 120, Color_v4(1, .1, .8, 1));
     }
 
     window_swap_buffers(win);

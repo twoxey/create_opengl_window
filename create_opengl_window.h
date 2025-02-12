@@ -34,6 +34,7 @@ void window_swap_buffers(const Window* win);
 // a gl context should have been bound to the current thread with wglMakeCurrent()
 // before using this function.
 void load_gl_procs();
+void gl_swap_interval(int interval); // 1 to enable vsync, 0 to disable
 
 //
 // Implementation
@@ -43,6 +44,8 @@ void load_gl_procs();
 #include "windows.h"
 #include "GL/gl.h"
 #include "GL/glext.h"
+#include "GL/wgl.h"
+
 #include "assert.h"
 
 #define ARRAY_LEN(a) (sizeof(a)/sizeof*(a))
@@ -80,13 +83,19 @@ XXX(PFNGLVERTEXATTRIBDIVISORPROC,       glVertexAttribDivisor) \
 XXX(PFNGLDRAWARRAYSINSTANCEDPROC,       glDrawArraysInstanced) \
 // GL_PROCS
 
+#define WGL_PROCS \
+XXX(PFNWGLSWAPINTERVALEXTPROC, wglSwapIntervalEXT) \
+// WGL_PROCS
+
 #define XXX(type, name) type name = NULL;
 GL_PROCS
+WGL_PROCS
 #undef XXX
 
 void load_gl_procs() {
 #define XXX(type, name) assert(name = (type)(void*)wglGetProcAddress(#name));
 GL_PROCS
+WGL_PROCS
 #undef XXX
 }
 
@@ -318,4 +327,16 @@ void window_make_current(const Window* win) {
 
 void window_swap_buffers(const Window* win) {
     SwapBuffers(win->hdc);
+}
+
+void gl_swap_interval(int interval) {
+    // TODO: check extension, example:
+    //
+    // PFNWGLGETEXTENSIONSSTRINGARBPROC wglGetExtensionsStringARB = (PFNWGLGETEXTENSIONSSTRINGARBPROC)(void*)wglGetProcAddress("wglGetExtensionsStringARB");
+    // const char* wgl_extensions = wglGetExtensionsStringARB(win->hdc);
+    // printf("wgl extensions:\n%s\n", wgl_extensions);
+    // PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)(void*)wglGetProcAddress("wglSwapIntervalEXT");
+    // assert(wglSwapIntervalEXT);
+
+    wglSwapIntervalEXT(interval);
 }
