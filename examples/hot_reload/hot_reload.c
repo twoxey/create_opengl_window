@@ -88,7 +88,7 @@ color_v4 Color_v4(float r, float g, float b, float a) {
 
 Window* on_load(Window* win) {
     if (!win) {
-        win = create_window();
+        win = create_window("Hot Reload");
         gl_swap_interval(1); // enable vsync
     } else {
         // we already have a window, just load the gl procs to call them in the dll

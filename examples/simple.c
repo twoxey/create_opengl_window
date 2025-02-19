@@ -1,7 +1,7 @@
 #include "create_opengl_window.h"
 
 int main(void) {
-    Window* win = create_window();
+    Window* win = create_window("Simple OpenGL Window");
     gl_swap_interval(1); // enable vsync;
 
     while (!window_should_close(win)) {

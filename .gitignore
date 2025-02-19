@@ -1,3 +1,4 @@
 *.exe
 *.dll
 out/
+.vscode/

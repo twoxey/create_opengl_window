@@ -13,7 +13,7 @@ uint64_t query_performance_counter() {
 }
 
 int main() {
-    Window* main_window = create_window();
+    Window* main_window = create_window("Main window");
     Window* sub_windows[5] = {};
 
     gl_swap_interval(1); // enable vsync;
@@ -27,7 +27,7 @@ int main() {
             if (event.type == Event_key_down && event.key == 'A') {
                 for (size_t i = 0; i < ARRAY_LEN(sub_windows); ++i) {
                     if (!sub_windows[i]) {
-                        sub_windows[i] = create_window();
+                        sub_windows[i] = create_window("Sub window");
                         break;
                     }
                 }

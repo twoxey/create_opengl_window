@@ -155,12 +155,24 @@ char* join_args(Arena* a, int argc, char* const argv[]) {
     return res;
 }
 
+int va_to_array_of_strings(Arena* a, va_list va, char*** array) {
+    int count = 0;
+    char** ptr = (char**)(a->base + a->used);
+    for (char* arg; arg = va_arg(va, char*);) {
+        ptr[count++] = arg;
+        a->used += sizeof(arg);
+    }
+    *array = ptr;
+    return count;
+}
+
 char* format_build_command(Arena* a, const char* cmd, const char* target, int num_deps, char* const deps[]) {
     char* res = a->base + a->used;
     for (const char* p = cmd; *p;) {
         if (*p == '%') {
             const char fmt_target[] = "%target";
             const char fmt_deps[] = "%deps";
+            const char fmt_first_dep[] = "%first_dep";
             if (str_starts_with(p, fmt_target)) {
                 copy_string(a, target);
                 --a->used; // remove the null terminator
@@ -169,6 +181,11 @@ char* format_build_command(Arena* a, const char* cmd, const char* target, int nu
                 join_args(a, num_deps, deps);
                 --a->used; // remove the null terminator
                 p += sizeof(fmt_deps) - 1;
+            } else if (str_starts_with(p, fmt_first_dep)) {
+                assert(num_deps >= 1);
+                copy_string(a, deps[0]);
+                --a->used; // remove the null terminator
+                p += sizeof(fmt_first_dep) - 1;
             } else {
                 fprintf(stderr, "[ERROR]: Invalid format argument in command: '%s'\n", cmd);
                 assert(!"Invalid format argument");
@@ -199,29 +216,40 @@ bool target_needs_rebuild_(const char* target_file_path, int deps_count, char* c
     return need_rebuild;
 }
 
-#define target_needs_rebuild(target, ...) target_needs_rebuild_v_(target, __VA_ARGS__, 0)
+#define target_needs_rebuild(target, ...) target_needs_rebuild_v_(target, __VA_ARGS__, NULL)
 bool target_needs_rebuild_v_(const char* target_file_path, ...) {
-    Arena a = arena_on_stack(4096);
-    int deps_count = 0;
-    char** deps = (char**)(a.base + a.used);
-
     va_list args;
     va_start(args, target_file_path);
-    for (char* arg; arg = va_arg(args, char*);) {
-        deps[deps_count++] = arg;
-        a.used += sizeof(arg);
-    }
+
+    Arena a = arena_on_stack(4096);
+    char** deps = (char**)(a.base + a.used);
+    int deps_count = va_to_array_of_strings(&a, args, &deps);
+    bool result = target_needs_rebuild_(target_file_path, deps_count, deps);
+
     va_end(args);
 
-    return target_needs_rebuild_(target_file_path, deps_count, deps);
+    return result;
 }
 
-#define run_build_command(cmd, target, ...) do {char* deps[] = {__VA_ARGS__}; run_build_command_(cmd, target, sizeof(deps)/sizeof(deps[0]), sizeof(deps)?deps:0);} while(0)
-void run_build_command_(const char* cmd, const char* target, int num_deps, char* const deps[]) {
-    char* build_command = format_build_command(&arena_on_stack(1024), cmd, target, num_deps, deps);
-    if (target_needs_rebuild_(target, num_deps, deps)) {
-        run_command(build_command);
+#define run_build_command(cmd, target, ...) run_build_command_(cmd, target, ##__VA_ARGS__, NULL)
+DWORD run_build_command_(const char* cmd, const char* target, ...) {
+    DWORD result = 0;
+
+    va_list args;
+    va_start(args, target);
+
+    Arena a = arena_on_stack(4096);
+    char** deps;
+    int deps_count = va_to_array_of_strings(&a, args, &deps);
+    char* build_command = format_build_command(&a, cmd, target, deps_count, deps);
+    printf("------------ Build command: %s\n", build_command);
+    if (!target || target_needs_rebuild_(target, deps_count, deps)) {
+        result = run_command(build_command);
     }
+
+    va_end(args);
+
+    return result;
 }
 
 void check_and_rebuild(int argc, char* argv[]) {
@@ -259,21 +287,43 @@ exit_process:
     ExitProcess(err);
 }
 
+#define CMD_BUILD_GL "gcc -I. -Wall -Wextra -o %target %first_dep -lgdi32 -lopengl32"
+
 int main(int argc, char* argv[]) {
     check_and_rebuild(argc, argv);
 
 #define out_path "out"
     assert(create_directory(out_path));
 
-    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/multi-window.exe", "examples/multiple_windows.c");
-    run_build_command("gcc -I. -Wall -Wextra -o %target %deps -lgdi32 -lopengl32", out_path"/simple.exe", "examples/simple.c");
+    DWORD err = 0;
+    err = run_build_command(CMD_BUILD_GL, out_path"/multi-window.exe",
+                            // dependencies
+                            "examples/multiple_windows.c",
+                            "create_opengl_window.h");
+    if (err) return 1;
+
+    err = run_build_command(CMD_BUILD_GL, out_path"/simple.exe",
+                            // dependences
+                            "examples/simple.c",
+                            "create_opengl_window.h");
+    if (err) return 1;
 
     // hot reload example
 #define src_dir "examples/hot_reload"
-    run_build_command("cpp -P -CC -o %target %deps", out_path"/quad_shader_processed.c", src_dir"/quad_shader.c");
-    run_build_command("gcc -shared -I. -Wall -Wextra -o %target " src_dir"/hot_reload.c" " -lgdi32 -lopengl32", out_path"/hot_reload.dll",
-                            src_dir"/hot_reload.c", src_dir"/quad_shader.c");
-    run_build_command("gcc -Wall -Wextra -o %target %deps", out_path"/hot_reload.exe", src_dir"/main.c");
+    err = run_build_command("cpp -P -CC -o %target %first_dep", out_path"/quad_shader_processed.c",
+                            // dependences
+                            src_dir"/quad_shader.c");
+    if (err) return 1;
+
+    err = run_build_command(CMD_BUILD_GL" -shared", out_path"/hot_reload.dll",
+                            // dependencies
+                            src_dir"/hot_reload.c",
+                            src_dir"/quad_shader.c",
+                            "create_opengl_window.h");
+    if (err) return 1;
+
+    err = run_build_command("gcc -Wall -Wextra -o %target %first_dep", out_path"/hot_reload.exe", src_dir"/main.c");
+    if (err) return 1;
 
     return 0;
 }
