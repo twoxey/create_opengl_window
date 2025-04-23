@@ -89,6 +89,7 @@ FILETIME* get_file_last_write_time_(const char* file_path, FILETIME* last_write_
         assert(!"Unexpected error");
     }
     *last_write_time = find_data.ftLastWriteTime;
+    FindClose(find);
     return last_write_time;
 }
 
